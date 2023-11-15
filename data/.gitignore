@@ -1,0 +1,4 @@
+# Do not add to git files in this directory
+*
+# Except this file
+!.gitignore
