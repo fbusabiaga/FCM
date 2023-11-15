@@ -34,14 +34,17 @@ def read_config(name):
   Read config and store in an array of shape (num_bodies, 3).
   '''
   # Read config
+  N = 0
   x = []
   with open(name, 'r') as f_handle:
     for k, line in enumerate(f_handle):
       if k == 0:
-        continue
+        N = int(line)
       else:
         data = np.fromstring(line, sep=' ')
         x.append(data)
+      if k >= N:
+        break
   x = np.array(x)
 
   # Return config
