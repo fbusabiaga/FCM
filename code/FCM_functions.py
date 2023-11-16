@@ -2,6 +2,17 @@ import numpy as np
 import sys
 import argparse
 
+
+def is_number(s):
+  '''
+  Check if a string is a number or not.
+  '''
+  try:
+    float(s)
+    return True
+  except ValueError:
+    return False
+
 def read_input(name):
   '''
   Build a dictionary from an input file.
@@ -24,8 +35,14 @@ def read_input(name):
       line = line.strip()
       if line != '':
         option, value = line.split(None, 1)
-        options[option] = value
 
+        # Save as a number, numpy array or string
+        if is_number(value.split(None)[0]):
+          value = np.fromstring(value, sep=' ')
+          options[option] = value[0] if value.size == 1 else value
+        else:
+          options[option] = value
+   
   return options
 
 
@@ -49,5 +66,36 @@ def read_config(name):
 
   # Return config
   return x
+
+
+def advance_time_step(dt, scheme, step, parameters):
+  '''
+  Advance time step with integrator self.scheme
+  '''
+  if scheme == 'deterministic_forward_Euler':
+    return deterministic_forward_Euler(dt, scheme, step, parameters)
+  else:
+    print('Scheme: ', scheme, ' is not implemented.')
+  return
+
+
+def deterministic_forward_Euler(dt, scheme, step, parameters):
+  '''
+  Forward Euler scheme.
+  '''
+  # Compute force between particles
+
+  # Spread force
+
+  # Solve Stokes equations
+
+  # Interpolate velocity
+
+  # Advance particle positions
+
+
+
+  
+  
 
 

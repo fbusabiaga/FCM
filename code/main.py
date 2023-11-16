@@ -17,13 +17,14 @@ if __name__ == '__main__':
   # Read input file
   read = FCM.read_input(input_file)
 
-  # Set some parameters
-  dt = float(read.get('dt')) 
-  n_save = int(read.get('n_save') if read.get('n_save') else 1)
-  n_steps = int(read.get('n_steps'))  
-  initial_step = int(read.get('initial_step') if read.get('initial_step') else 0)    
-  eta = float(read.get('eta'))
-  kT = float(read.get('kT') if read.get('kT') else 0)
+  # Some input variables should be converted to integers or set to default values if they do not exist
+  read['n_steps'] = int(read['n_steps']) if 'n_steps' in read else 1
+  read['n_save'] = int(read['n_save']) if 'n_save' in read else 1
+  read['initial_step'] = int(read['initial_step']) if 'initial_step' in read else 0
+  read['M_system'] = np.array(read['M_system'], dtype=int) if 'M_system' in read else np.zeros(3)
+  
+  # Some input variables should be set to default values if they do not exist
+  read['kT'] = read['n_steps'] if 'kT' in read else 0  
     
   # Read particles configuration
   x = FCM.read_config(read.get('structure'))
@@ -35,22 +36,22 @@ if __name__ == '__main__':
       
   # Time loop
   start_time = time.time()
-  for step in range(initial_step, n_steps):
+  for step in range(read.get('initial_step'), read.get('n_steps')):
 
     # Save data
-    if (step % n_save) == 0 and step >= 0:    
+    if (step % read.get('n_save')) == 0 and step >= 0:    
       print('step = ', step, ', time = ', time.time() - start_time)
       
       # Save configuration
       config_file.write(str(x.shape[0]) + '\n')
       np.savetxt(config_file, x)
       
-    # Advance time step
-    
+      # Advance time step
+      FCM.advance_time_step(read.get('dt'), read.get('scheme'), step, read)
 
     
   # Save last configuration if necessary
-  if ((step+1) % n_save) == 0 and step+1 >= 0:    
+  if ((step+1) % read.get('n_save')) == 0 and step+1 >= 0:    
     print('step = ', step+1, ', time = ', time.time() - start_time)
 
     # Save configuration
