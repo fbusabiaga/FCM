@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import argparse
+from numba import njit, prange
 
 
 def is_number(s):
@@ -12,6 +13,20 @@ def is_number(s):
     return True
   except ValueError:
     return False
+
+
+def project_to_periodic_image(r, L):
+  '''
+  Project a vector r to the minimal image representation of size L=(Lx, Ly) and with a corner at (0,0).
+  If any dimension of L is equal or smaller than zero the box is assumed to be infinite in that direction.
+    
+  If one dimension is not periodic shift all coordinates by min(r[:,i]) value.
+  '''
+  r_PBC = np.empty_like(r)
+  for i in range(2):
+    r_PBC[:,i] = r[:,i] - (r[:,i] // L[i]) * L[i]
+  return r_PBC
+
 
 def read_input(name):
   '''
@@ -68,32 +83,122 @@ def read_config(name):
   return x
 
 
-def advance_time_step(dt, scheme, step, parameters):
+def create_mesh(parameters):
+  '''
+  Create 2d mesh.
+  '''
+  L = parameters.get('L_system')
+  M = parameters.get('M_system')
+  num_points = M[0] * M[1]
+  
+  # Set grid coordinates along axes
+  dx = L / M
+  grid_x = np.array([0 + dx[0] * (x+0.5) for x in range(M[0])])
+  grid_y = np.array([0 + dx[1] * (x+0.5) for x in range(M[1])])
+
+  # Create mesh
+  xx, yy = np.meshgrid(grid_y, grid_x, indexing = 'ij')
+  r_mesh = np.zeros((num_points, 2))
+  r_mesh[:,0] = np.reshape(xx, xx.size)
+  r_mesh[:,1] = np.reshape(yy, yy.size)
+
+  # Create velocity field
+  velocity_mesh = np.zeros((num_points, 2))
+  vx_mesh = np.zeros((M[0], M[1]))
+  vy_mesh = np.zeros((M[0], M[1]))  
+  
+  return r_mesh, velocity_mesh, vx_mesh, vy_mesh
+
+
+def Gaussian(x, sigma):
+  return np.exp(-np.linalg.norm(x)**2 / (2 * sigma**2)) / (2 * np.pi * sigma**2)
+
+
+@njit(parallel=True, fastmath=True)
+def interpolate(x, r_mesh, vx_mesh, vy_mesh, L):
+  '''
+  Interpolate fluid velocity.
+  '''
+  velocity_particles = np.zeros_like(x)
+  strain_rate_xx = np.zeros(r_mesh.size // 2)
+  strain_rate_xy = np.zeros(r_mesh.size // 2)
+  strain_rate_yx = np.zeros(r_mesh.size // 2)
+  strain_rate_yy = np.zeros(r_mesh.size // 2)
+
+  # Prepare some variables
+  Lx = L[0]
+  Ly = L[1]
+  dx = L[0] / r_mesh.shape[0]
+  dy = L[1] / r_mesh.shape[1]  
+  N = 10
+  sigma = 0.15
+  sigma2 = sigma**2
+  factor_gaussian = 1.0 / (2 * np.pi * sigma2)
+  x_disp = np.zeros(2)
+
+  # Get vectors in the minimal image representation of size L=(Lx, Ly) and with a corner at (0,0).
+  x_PBC = np.empty_like(x)
+  for axis in range(2):
+    x_PBC[:,axis] = x[:,axis] - (x[:,axis] // L[axis]) * L[axis]  
+
+  # Loop over particles
+  for n in prange(x.shape[0]):
+    kx = int(x_PBC[n,0] / Lx * r_mesh.shape[0])
+    ky = int(x_PBC[n,1] / Ly * r_mesh.shape[1])
+
+    # Loop over neighboring cells
+    for cellx in range(-N, N, 1):
+      kx_PBC = kx + cellx - ((kx + cellx) // r_mesh.shape[0]) * r_mesh.shape[0]
+      x_disp[0] = r_mesh[kx, 0, 0] - x_PBC[n,0] + cellx * dx
+      
+      for celly in range(-N, N, 1):
+        ky_PBC = ky + celly - ((ky + celly) // r_mesh.shape[1]) * r_mesh.shape[1]
+        x_disp[1] = r_mesh[0,ky, 1] - x_PBC[n,1] + celly * dy
+        factor = np.exp(-np.linalg.norm(x_disp)**2 / (2 * sigma2)) / (2 * np.pi * sigma2) * dx * dy
+        velocity_particles[n,0] += vx_mesh[kx_PBC, ky_PBC] * factor
+        velocity_particles[n,1] += vy_mesh[kx_PBC, ky_PBC] * factor
+    
+  return velocity_particles, 2
+  
+
+def advance_time_step(dt, scheme, step, x, r_mesh, velocity_mesh, vx_mesh, vy_mesh, parameters):
   '''
   Advance time step with integrator self.scheme
   '''
-  if scheme == 'deterministic_forward_Euler':
-    return deterministic_forward_Euler(dt, scheme, step, parameters)
+  if scheme == 'deterministic_forward_Euler_no_stresslet':
+    return deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, r_mesh, velocity_mesh, vx_mesh, vy_mesh, parameters)     
+  elif scheme == 'deterministic_forward_Euler':
+    return deterministic_forward_Euler(dt, scheme, step, r_mesh, velocity_mesh, parameters)
   else:
     print('Scheme: ', scheme, ' is not implemented.')
   return
 
 
-def deterministic_forward_Euler(dt, scheme, step, parameters):
+def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, r_mesh, velocity_mesh, vx_mesh, vy_mesh, parameters):
   '''
-  Forward Euler scheme.
+  Forward Euler scheme without including stresslet.
   '''
+  # Get parameters
+  M = parameters.get('M_system')
+  L = parameters.get('L_system')
+  
   # Compute force between particles
-
+  
   # Spread force
 
-  # Solve Stokes equations
-
+  # Solve Stokes equations 
+  r_mesh = r_mesh.reshape((M[0], M[1], 2))
+  # vx_mesh[:,:] = np.sin(2 * np.pi * r_mesh[:,:,0] / L[0])
+  vx_mesh[:,:] = r_mesh[:,:,0]
+  
   # Interpolate velocity
+  velocity_particles, strain_rate = interpolate(x, r_mesh, vx_mesh, vy_mesh, L)
 
+  print('velocity_particles = \n', velocity_particles)
+  
   # Advance particle positions
 
-
+  
 
   
   

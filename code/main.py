@@ -28,7 +28,10 @@ if __name__ == '__main__':
     
   # Read particles configuration
   x = FCM.read_config(parameters.get('structure'))
-  
+
+  # Create mesh
+  r_mesh, velocity_mesh, vx_mesh, vy_mesh = FCM.create_mesh(parameters)
+
   # Open files
   if True:
     name = parameters.get('output_name') + '.config'
@@ -47,7 +50,7 @@ if __name__ == '__main__':
       np.savetxt(config_file, x)
       
       # Advance time step
-      FCM.advance_time_step(parameters.get('dt'), parameters.get('scheme'), step, parameters)
+      FCM.advance_time_step(parameters.get('dt'), parameters.get('scheme'), step, x, r_mesh, velocity_mesh, vx_mesh, vy_mesh, parameters)
 
     
   # Save last configuration if necessary
