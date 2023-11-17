@@ -204,7 +204,81 @@ def spread(x, force_torque, r_mesh, sigma_u, sigma_w, L):
     
   return fx_mesh, fy_mesh
 
+
+@njit(parallel=False, fastmath=True)
+def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, eta):
+  '''
+  The solution is v = (1 - G*D/L) * force / (eta * L)
+
+  with
+  G = Gradient
+  D = Divergence = Gradient^T
+  L = Laplacian = D * G  
+  '''
+  vx_Fourier = np.zeros_like(fx_Fourier)
+  vy_Fourier = np.zeros_like(fy_Fourier)  
   
+  for kx in range(fx_Fourier.shape[0]):
+    for ky in range(fx_Fourier.shape[1]):
+      # Compute Laplacian
+      L = -gradKx[kx].imag**2 - gradKy[ky].imag**2
+      if L == 0:
+        continue
+
+      if False:
+        # Compute divergence of the force
+        div = (gradKx[kx].imag * fx_Fourier[kx, ky].real + gradKy[ky].imag * fy_Fourier[kx, ky].real) \
+          +   (gradKx[kx].imag * fx_Fourier[kx, ky].imag + gradKy[ky].imag * fy_Fourier[kx, ky].imag) * 1.0j
+
+        # Compute velocity
+        vx_Fourier[kx, ky] = (fx_Fourier[kx, ky].real + gradKx[kx].imag * div.real / L) / (eta * L) \
+          +                  (fx_Fourier[kx, ky].imag + gradKx[kx].imag * div.imag / L) / (eta * L) * 1.0j
+
+        vy_Fourier[kx, ky] = (fy_Fourier[kx, ky].real + gradKy[ky].imag * div.real / L) / (eta * L) \
+          +                  (fy_Fourier[kx, ky].imag + gradKy[ky].imag * div.imag / L) / (eta * L) * 1.0j
+
+      else:
+        # Compute divergence of the force 
+        div = gradKx[kx] * fx_Fourier[kx, ky] + gradKy[ky] * fy_Fourier[kx, ky]
+        
+        # Compute velocity 
+        # vx_Fourier[kx, ky] = (fx_Fourier[kx, ky] - gradKx[kx] * div / L) / (eta * L) 
+        vy_Fourier[kx, ky] = (fy_Fourier[kx, ky] - gradKy[ky] * div / L) / (eta * L) 
+        
+  return vx_Fourier, vy_Fourier
+
+  
+def solve_Stokes(fx_mesh, fy_mesh, r_mesh, eta, kT, L):
+  '''
+  Solve Stokes equation with PBC.  
+  '''
+  # Prepare variables
+  dx = L[0] / r_mesh.shape[0]
+  dy = L[1] / r_mesh.shape[1]
+
+  # Prepare gradient arrays
+  gradKx = (2 / dx) * np.sin(np.pi * np.arange(r_mesh.shape[0]) / r_mesh.shape[0]) * 1.0j
+  gradKy = (2 / dy) * np.sin(np.pi * np.arange(r_mesh.shape[1]) / r_mesh.shape[1]) * 1.0j
+  
+  # Transform fields to Fourier space
+  fx_Fourier = np.fft.fft2(fx_mesh)
+  fy_Fourier = np.fft.fft2(fy_mesh)
+
+  # Solve in Fourier space
+  vx_Fourier, vy_Fourier = solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, eta)
+
+  # Transform velocities to real space
+  vx_mesh = np.fft.ifft2(vx_Fourier)
+  vy_mesh = np.fft.ifft2(vy_Fourier)
+
+  print('vx_mesh.imag = ', np.linalg.norm(vx_mesh.imag))
+  print('vy_mesh.imag = ', np.linalg.norm(vy_mesh.imag))
+  print('vx_mesh.real = ', np.linalg.norm(vx_mesh.real))
+  print('vy_mesh.real = ', np.linalg.norm(vy_mesh.real))
+  print(' ')
+  
+  return vx_mesh.real, vy_mesh.real
+
 
 def advance_time_step(dt, scheme, step, x, r_mesh, velocity_mesh, vx_mesh, vy_mesh, parameters):
   '''
@@ -224,8 +298,9 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, r_mesh, veloci
   Forward Euler scheme without including stresslet.
   '''
   # Get parameters
+  eta = parameters.get('eta')  
   M = parameters.get('M_system')
-  L = parameters.get('L_system')
+  L = parameters.get('L_system')  
   r_mesh = r_mesh.reshape((M[0], M[1], 2))
   
   # Compute force between particles
@@ -234,16 +309,19 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, r_mesh, veloci
   
   # Spread force
   fx_mesh, fy_mesh = spread(x, force_torque, r_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L)
+  print('Fx = ', np.sum(fx_mesh) * L[0] / M[0] * L[1] / M[1])
+  print('Fy = ', np.sum(fy_mesh) * L[0] / M[0] * L[1] / M[1])
   
   # Solve Stokes equations
-  # vx_mesh[:,:] = 1.0
-  vx_mesh = fx_mesh
+  vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, r_mesh, eta, 0, L)
 
+  print('vx_mesh = ', np.sum(vx_mesh) * L[0] / M[0] * L[1] / M[1])
+  print('vy_mesh = ', np.sum(vy_mesh) * L[0] / M[0] * L[1] / M[1])
   
   # Interpolate velocity
   velocity_particles, strain_rate = interpolate(x, r_mesh, vx_mesh, vy_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L)
 
-  print('velocity_particles = \n', velocity_particles)
+  print('velocity_particles = \n', velocity_particles, '\n\n')
   
   # Advance particle positions
   x += dt * velocity_particles
