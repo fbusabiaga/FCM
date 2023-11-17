@@ -115,7 +115,7 @@ def Gaussian(x, sigma):
 
 
 @njit(parallel=True, fastmath=True)
-def interpolate(x, r_mesh, vx_mesh, vy_mesh, L):
+def interpolate(x, r_mesh, vx_mesh, vy_mesh, sigma_u, sigma_w, L):
   '''
   Interpolate fluid velocity.
   '''
@@ -130,10 +130,9 @@ def interpolate(x, r_mesh, vx_mesh, vy_mesh, L):
   Ly = L[1]
   dx = L[0] / r_mesh.shape[0]
   dy = L[1] / r_mesh.shape[1]  
-  N = 10
-  sigma = 0.15
-  sigma2 = sigma**2
-  factor_gaussian = 1.0 / (2 * np.pi * sigma2)
+  N = 4 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
+  sigma_u2 = sigma_u**2
+  factor_gaussian = 1.0 / (2 * np.pi * sigma_u2)
   x_disp = np.zeros(2)
 
   # Get vectors in the minimal image representation of size L=(Lx, Ly) and with a corner at (0,0).
@@ -154,11 +153,57 @@ def interpolate(x, r_mesh, vx_mesh, vy_mesh, L):
       for celly in range(-N, N, 1):
         ky_PBC = ky + celly - ((ky + celly) // r_mesh.shape[1]) * r_mesh.shape[1]
         x_disp[1] = r_mesh[0,ky, 1] - x_PBC[n,1] + celly * dy
-        factor = np.exp(-np.linalg.norm(x_disp)**2 / (2 * sigma2)) / (2 * np.pi * sigma2) * dx * dy
+        factor = np.exp(-np.linalg.norm(x_disp)**2 / (2 * sigma_u2)) / (2 * np.pi * sigma_u2) * dx * dy
         velocity_particles[n,0] += vx_mesh[kx_PBC, ky_PBC] * factor
         velocity_particles[n,1] += vy_mesh[kx_PBC, ky_PBC] * factor
     
   return velocity_particles, 2
+
+
+@njit(parallel=False, fastmath=True)
+def spread(x, force_torque, r_mesh, sigma_u, sigma_w, L):
+  '''
+  Interpolate fluid velocity.
+  '''
+  fx_mesh = np.zeros((r_mesh.shape[0], r_mesh.shape[1]))
+  fy_mesh = np.zeros((r_mesh.shape[0], r_mesh.shape[1]))  
+
+  # Prepare some variables
+  Lx = L[0]
+  Ly = L[1]
+  dx = L[0] / r_mesh.shape[0]
+  dy = L[1] / r_mesh.shape[1]  
+  N = 4 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
+  sigma_u2 = sigma_u**2
+  factor_gaussian = 1.0 / (2 * np.pi * sigma_u2)
+  x_disp = np.zeros(2)
+
+  # Get vectors in the minimal image representation of size L=(Lx, Ly) and with a corner at (0,0).
+  x_PBC = np.empty_like(x)
+  for axis in range(2):
+    x_PBC[:,axis] = x[:,axis] - (x[:,axis] // L[axis]) * L[axis]  
+
+  # Loop over particles
+  for n in range(x.shape[0]):
+    kx = int(x_PBC[n,0] / Lx * r_mesh.shape[0])
+    ky = int(x_PBC[n,1] / Ly * r_mesh.shape[1])
+
+    # Loop over neighboring cells
+    for cellx in range(-N, N, 1):
+      kx_PBC = kx + cellx - ((kx + cellx) // r_mesh.shape[0]) * r_mesh.shape[0]
+      x_disp[0] = r_mesh[kx, 0, 0] - x_PBC[n,0] + cellx * dx
+      
+      for celly in range(-N, N, 1):
+        ky_PBC = ky + celly - ((ky + celly) // r_mesh.shape[1]) * r_mesh.shape[1]
+        x_disp[1] = r_mesh[0,ky, 1] - x_PBC[n,1] + celly * dy
+        factor = np.exp(-np.linalg.norm(x_disp)**2 / (2 * sigma_u2)) / (2 * np.pi * sigma_u2)
+
+        # Spread force
+        fx_mesh[kx_PBC, ky_PBC] += factor * force_torque[n,0]
+        fy_mesh[kx_PBC, ky_PBC] += factor * force_torque[n,1]
+    
+  return fx_mesh, fy_mesh
+
   
 
 def advance_time_step(dt, scheme, step, x, r_mesh, velocity_mesh, vx_mesh, vy_mesh, parameters):
@@ -181,26 +226,29 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, r_mesh, veloci
   # Get parameters
   M = parameters.get('M_system')
   L = parameters.get('L_system')
+  r_mesh = r_mesh.reshape((M[0], M[1], 2))
   
   # Compute force between particles
+  force_torque = np.zeros((x.shape[0], 3))
+  force_torque[0, 0] = 1
   
   # Spread force
+  fx_mesh, fy_mesh = spread(x, force_torque, r_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L)
+  
+  # Solve Stokes equations
+  # vx_mesh[:,:] = 1.0
+  vx_mesh = fx_mesh
 
-  # Solve Stokes equations 
-  r_mesh = r_mesh.reshape((M[0], M[1], 2))
-  # vx_mesh[:,:] = np.sin(2 * np.pi * r_mesh[:,:,0] / L[0])
-  vx_mesh[:,:] = r_mesh[:,:,0]
   
   # Interpolate velocity
-  velocity_particles, strain_rate = interpolate(x, r_mesh, vx_mesh, vy_mesh, L)
+  velocity_particles, strain_rate = interpolate(x, r_mesh, vx_mesh, vy_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L)
 
   print('velocity_particles = \n', velocity_particles)
   
   # Advance particle positions
+  x += dt * velocity_particles
+  print('x = ', x)
 
-  
-
-  
   
 
 
