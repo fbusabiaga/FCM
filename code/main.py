@@ -21,10 +21,11 @@ if __name__ == '__main__':
   parameters['n_steps'] = int(parameters['n_steps']) if 'n_steps' in parameters else 1
   parameters['n_save'] = int(parameters['n_save']) if 'n_save' in parameters else 1
   parameters['initial_step'] = int(parameters['initial_step']) if 'initial_step' in parameters else 0
-  parameters['M_system'] = np.array(parameters['M_system'], dtype=int) if 'M_system' in parameters else np.zeros(3)
+  parameters['M_system'] = np.array(parameters['M_system'], dtype=int) if 'M_system' in parameters else np.zeros(3, dtype=int)
 
   # Some input variables should be set to default values if they do not exist
-  parameters['kT'] = parameters['n_steps'] if 'kT' in parameters else 0  
+  parameters['kT'] = parameters['n_steps'] if 'kT' in parameters else 0
+  parameters['plot_velocity_field'] = parameters['plot_velocity_field'] if 'plot_velocity_field' in parameters else False
 
   # Create some additional variables
   parameters['sigma_u'] = parameters.get('particle_radius') / np.sqrt(np.pi)
@@ -32,9 +33,6 @@ if __name__ == '__main__':
       
   # Read particles configuration
   x = FCM.read_config(parameters.get('structure'))
-
-  # Create mesh
-  r_mesh, velocity_mesh, vx_mesh, vy_mesh = FCM.create_mesh(parameters)
 
   # Open files
   if True:
@@ -54,7 +52,7 @@ if __name__ == '__main__':
       np.savetxt(config_file, x)
       
       # Advance time step
-      FCM.advance_time_step(parameters.get('dt'), parameters.get('scheme'), step, x, velocity_mesh, vx_mesh, vy_mesh, parameters)
+      FCM.advance_time_step(parameters.get('dt'), parameters.get('scheme'), step, x, parameters)
     
   # Save last configuration if necessary
   if ((step+1) % parameters.get('n_save')) == 0 and step+1 >= 0:    

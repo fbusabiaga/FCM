@@ -106,7 +106,7 @@ def create_mesh(parameters):
   grid_y = np.array([0 + dx[1] * (x+0.5) for x in range(M[1])])
   
   # Create mesh
-  yy, xx = np.meshgrid(grid_y, grid_x, indexing = 'ij')
+  xx, yy = np.meshgrid(grid_x, grid_y, indexing = 'ij')
   r_mesh = np.zeros((num_points, 2))
   r_mesh[:,0] = np.reshape(xx, xx.size)
   r_mesh[:,1] = np.reshape(yy, yy.size)
@@ -219,18 +219,18 @@ def interpolate(x, vx_mesh, vy_mesh, sigma_u, sigma_w, L, M):
 
 
 @njit(parallel=False, fastmath=True)
-def spread(x, force_torque, r_mesh, sigma_u, sigma_w, L):
+def spread(x, force_torque, sigma_u, sigma_w, L, M):
   '''
   Interpolate fluid velocity.
   '''
-  fx_mesh = np.zeros((r_mesh.shape[0], r_mesh.shape[1]))
-  fy_mesh = np.zeros((r_mesh.shape[0], r_mesh.shape[1]))  
+  fx_mesh = np.zeros((M[0], M[1]))
+  fy_mesh = np.zeros((M[0], M[1]))
 
   # Prepare some variables
   Lx = L[0]
   Ly = L[1]
-  dx = L[0] / r_mesh.shape[0]
-  dy = L[1] / r_mesh.shape[1]  
+  dx = L[0] / M[0]
+  dy = L[1] / M[1]
   N = 4 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
   sigma_u2 = sigma_u**2
   factor_gaussian = 1.0 / (2 * np.pi * sigma_u2)
@@ -243,17 +243,17 @@ def spread(x, force_torque, r_mesh, sigma_u, sigma_w, L):
 
   # Loop over particles
   for n in range(x.shape[0]):
-    kx = int(x_PBC[n,0] / Lx * r_mesh.shape[0])
-    ky = int(x_PBC[n,1] / Ly * r_mesh.shape[1])
+    kx = int(x_PBC[n,0] / Lx * M[0])
+    ky = int(x_PBC[n,1] / Ly * M[1])
 
     # Loop over neighboring cells
     for cellx in range(-N, N, 1):
-      kx_PBC = kx + cellx - ((kx + cellx) // r_mesh.shape[0]) * r_mesh.shape[0]
-      x_disp[0] = r_mesh[kx, 0, 0] - x_PBC[n,0] + cellx * dx
+      kx_PBC = kx + cellx - ((kx + cellx) // M[0]) * M[0]
+      x_disp[0] = dx * (kx+0.5) + cellx * dx - x_PBC[n,0]
       
       for celly in range(-N, N, 1):
-        ky_PBC = ky + celly - ((ky + celly) // r_mesh.shape[1]) * r_mesh.shape[1]
-        x_disp[1] = r_mesh[0,ky, 1] - x_PBC[n,1] + celly * dy
+        ky_PBC = ky + celly - ((ky + celly) // M[1]) * M[1]
+        x_disp[1] = dy * (ky+0.5) + celly * dy - x_PBC[n,1]        
         factor = np.exp(-np.linalg.norm(x_disp)**2 / (2 * sigma_u2)) / (2 * np.pi * sigma_u2)
 
         # Spread force
@@ -350,20 +350,20 @@ def solve_Stokes(fx_mesh, fy_mesh, r_mesh, eta, kT, L):
   return vx_mesh.real, vy_mesh.real
 
 
-def advance_time_step(dt, scheme, step, x, velocity_mesh, vx_mesh, vy_mesh, parameters):
+def advance_time_step(dt, scheme, step, x, parameters):
   '''
   Advance time step with integrator self.scheme
   '''
   if scheme == 'deterministic_forward_Euler_no_stresslet':
-    return deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, velocity_mesh, vx_mesh, vy_mesh, parameters)     
+    return deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters) 
   elif scheme == 'deterministic_forward_Euler':
-    return deterministic_forward_Euler(dt, scheme, step, velocity_mesh, parameters)
+    return deterministic_forward_Euler(dt, scheme, step, parameters)
   else:
     print('Scheme: ', scheme, ' is not implemented.')
   return
 
 
-def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, velocity_mesh, vx_mesh, vy_mesh, parameters):
+def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters):
   '''
   Forward Euler scheme without including stresslet.
   '''
@@ -376,46 +376,29 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, velocity_mesh,
   dx = L / M
   grid_x = np.array([0 + dx[0] * (x+0.5) for x in range(M[0])])
   grid_y = np.array([0 + dx[1] * (x+0.5) for x in range(M[1])])
-
-  # Create mesh
-  xx, yy = np.meshgrid(grid_y, grid_x, indexing = 'ij')
-  r_mesh = np.zeros((M[0], M[1], 2))
-  #r_mesh[:,0] = np.reshape(xx, xx.size)
-  #r_mesh[:,1] = np.reshape(yy, yy.size)
-  # r_mesh[:,:,0] = xx
-  # r_mesh[:,:,1] = yy
   
   # Compute force between particles
   force_torque = np.zeros((x.shape[0], 3))
   force_torque[0, 0] = 1
   
   # Spread force
-  #fx_mesh, fy_mesh = spread(x, force_torque, r_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L)
-  #print('Fx = ', np.sum(fx_mesh) * L[0] / M[0] * L[1] / M[1])
-  #print('Fy = ', np.sum(fy_mesh) * L[0] / M[0] * L[1] / M[1])
-  #fx_mesh[:,:] = np.sin(2 * np.pi / L[0] * r_mesh[:,:,0])
-  
-
-  
+  fx_mesh, fy_mesh = spread(x, force_torque, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
+  print('Fx = ', np.sum(fx_mesh) * L[0] / M[0] * L[1] / M[1])
+  print('Fy = ', np.sum(fy_mesh) * L[0] / M[0] * L[1] / M[1])
+ 
   # Solve Stokes equations
   # vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, r_mesh, eta, 0, L)
-  #vx_mesh[:,:] = np.sin(2 * np.pi / L[0] * r_mesh[:,:,0])
-  #vy_mesh[:,:] = r_mesh[:,:,0] * 0
-  
-  # Plot vtk
-  #plot_velocity_field(r_mesh, vx_mesh, vy_mesh, parameters.get('output_name'))  
-  #print('vx_mesh = ', np.sum(vx_mesh) * L[0] / M[0] * L[1] / M[1])
-  #print('vy_mesh = ', np.sum(vy_mesh) * L[0] / M[0] * L[1] / M[1])
   
   # Interpolate velocity
   vx_mesh = np.zeros((M[0], M[1]))
   vy_mesh = np.zeros((M[0], M[1]))
-  vx_mesh[:,:] = r_mesh[:,:,0]
-  plot_velocity_field(L, M, vx_mesh, vy_mesh, parameters.get('output_name'))  
-                     
+  vx_mesh[:,:] = fx_mesh
+  vy_mesh[:,:] = fy_mesh
   velocity_particles, strain_rate = interpolate(x, vx_mesh, vy_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
-
   print('velocity_particles = \n', velocity_particles, '\n\n')
+
+  if parameters.get('plot_velocity_field'):
+    plot_velocity_field(L, M, vx_mesh, vy_mesh, parameters.get('output_name')) 
   
   # Advance particle positions
   x += dt * velocity_particles
