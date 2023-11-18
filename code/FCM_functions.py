@@ -127,12 +127,6 @@ def plot_velocity_field(L, M, vx_mesh, vy_mesh, output):
   dx = L / M
   grid_x = np.array([0 + dx[0] * (x+0.5) for x in range(M[0])])
   grid_y = np.array([0 + dx[1] * (x+0.5) for x in range(M[1])])
-
-  # Create mesh, not needed
-  # xx, yy = np.meshgrid(grid_x, grid_y, indexing = 'ij')
-  # r_mesh = np.zeros((M[0], M[1], 2))
-  # r_mesh[:,:,0] = xx
-  # r_mesh[:,:,1] = yy 
   
   # Prepare grid values
   velocity = np.zeros((M[0] * M[1], 3))
@@ -141,7 +135,7 @@ def plot_velocity_field(L, M, vx_mesh, vy_mesh, output):
       velocity[iy * M[0] + ix, 0] = vx_mesh[ix, iy]
       velocity[iy * M[0] + ix, 1] = vy_mesh[ix, iy]
   
-  # Prepara data for VTK writer 
+  # Prepare data for VTK writer 
   variables = [np.reshape(velocity, velocity.size)] 
   dims = np.array([M[0]+1, M[1]+1, 1], dtype=np.int32) 
   nvars = 1
@@ -196,21 +190,21 @@ def interpolate(x, vx_mesh, vy_mesh, sigma_u, sigma_w, L, M):
   # Get vectors in the minimal image representation of size L=(Lx, Ly) and with a corner at (0,0).
   x_PBC = np.empty_like(x)
   for axis in range(2):
-    x_PBC[:,axis] = x[:,axis] - (x[:,axis] // L[axis]) * L[axis]  
+    x_PBC[:,axis] = x[:,axis] - (x[:,axis] // L[axis]) * L[axis]
 
   # Loop over particles
   for n in prange(x.shape[0]):
-    kx = int(x_PBC[n,0] / Lx * M[0])
-    ky = int(x_PBC[n,1] / Ly * M[1])
+    kx = int(x_PBC[n,0]  / Lx * M[0])
+    ky = int(x_PBC[n,1]  / Ly * M[1])
 
     # Loop over neighboring cells
     for cellx in range(-N, N, 1):
       kx_PBC = kx + cellx - ((kx + cellx) // M[0]) * M[0]
-      x_disp[0] = dx * (kx+0.5) + cellx * dx - x_PBC[n,0]
+      x_disp[0] = dx * (kx + cellx + 0.5) - x_PBC[n,0]
       
       for celly in range(-N, N, 1):
         ky_PBC = ky + celly - ((ky + celly) // M[1]) * M[1]
-        x_disp[1] = dy * (ky+0.5) + celly * dy - x_PBC[n,1]
+        x_disp[1] = dy * (ky + celly + 0.5) - x_PBC[n,1]
         factor = np.exp(-np.linalg.norm(x_disp)**2 / (2 * sigma_u2)) / (2 * np.pi * sigma_u2) * dx * dy
         velocity_particles[n,0] += vx_mesh[kx_PBC, ky_PBC] * factor
         velocity_particles[n,1] += vy_mesh[kx_PBC, ky_PBC] * factor
@@ -249,11 +243,11 @@ def spread(x, force_torque, sigma_u, sigma_w, L, M):
     # Loop over neighboring cells
     for cellx in range(-N, N, 1):
       kx_PBC = kx + cellx - ((kx + cellx) // M[0]) * M[0]
-      x_disp[0] = dx * (kx+0.5) + cellx * dx - x_PBC[n,0]
+      x_disp[0] = dx * (kx + cellx + 0.5) - x_PBC[n,0]
       
       for celly in range(-N, N, 1):
         ky_PBC = ky + celly - ((ky + celly) // M[1]) * M[1]
-        x_disp[1] = dy * (ky+0.5) + celly * dy - x_PBC[n,1]        
+        x_disp[1] = dy * (ky + celly + 0.5) - x_PBC[n,1]
         factor = np.exp(-np.linalg.norm(x_disp)**2 / (2 * sigma_u2)) / (2 * np.pi * sigma_u2)
 
         # Spread force
@@ -264,7 +258,7 @@ def spread(x, force_torque, sigma_u, sigma_w, L, M):
 
 
 @njit(parallel=False, fastmath=True)
-def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, eta):
+def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, expKx, expKy, eta):
   '''
   The solution is v = (1 - G*D/L) * force / (eta * L)
 
@@ -276,69 +270,55 @@ def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, eta):
   vx_Fourier = np.zeros_like(fx_Fourier)
   vy_Fourier = np.zeros_like(fy_Fourier)  
   
-  for kx in range(fx_Fourier.shape[0]):
-    for ky in range(fx_Fourier.shape[1]):
+  for kx in range(gradKx.shape[0]):
+    for ky in range(gradKy.shape[0]):
       # Compute Laplacian
       L = -gradKx[kx].imag**2 - gradKy[ky].imag**2
-      if L == 0:
+      if abs(L) < 1e-10:
         continue
 
-      if False:
-        # Compute divergence of the force
-        div = (gradKx[kx].imag * fx_Fourier[kx, ky].real + gradKy[ky].imag * fy_Fourier[kx, ky].real) \
-          +   (gradKx[kx].imag * fx_Fourier[kx, ky].imag + gradKy[ky].imag * fy_Fourier[kx, ky].imag) * 1.0j
-
-        # Compute velocity
-        vx_Fourier[kx, ky] = (fx_Fourier[kx, ky].real + gradKx[kx].imag * div.real / L) / (eta * L) \
-          +                  (fx_Fourier[kx, ky].imag + gradKx[kx].imag * div.imag / L) / (eta * L) * 1.0j
-
-        vy_Fourier[kx, ky] = (fy_Fourier[kx, ky].real + gradKy[ky].imag * div.real / L) / (eta * L) \
-          +                  (fy_Fourier[kx, ky].imag + gradKy[ky].imag * div.imag / L) / (eta * L) * 1.0j
-
-      else:
-        # Compute divergence of the force 
-        div = gradKx[kx] * fx_Fourier[kx, ky] + gradKy[ky] * fy_Fourier[kx, ky]
+      # Shift mode
+      fx_Fourier[kx, ky] = fx_Fourier[kx, ky] * np.conjugate(expKx[kx]) * np.conjugate(expKy[ky]) 
+      fy_Fourier[kx, ky] = fy_Fourier[kx, ky] * np.conjugate(expKy[ky]) * np.conjugate(expKx[kx]) 
+               
+      # Compute divergence of the force 
+      div = gradKx[kx] * fx_Fourier[kx, ky] + gradKy[ky] * fy_Fourier[kx, ky]
         
-        # Compute velocity 
-        #vx_Fourier[kx, ky] = (fx_Fourier[kx, ky] - gradKx[kx] * div / L) / (eta * L) 
-        #vy_Fourier[kx, ky] = (fy_Fourier[kx, ky] - gradKy[ky] * div / L) / (eta * L)
+      # Compute velocity 
+      vx_Fourier[kx, ky] = -(fx_Fourier[kx, ky] - gradKx[kx] * div / L) / (eta * L) 
+      vy_Fourier[kx, ky] = -(fy_Fourier[kx, ky] - gradKy[ky] * div / L) / (eta * L)
 
-        if np.absolute(fx_Fourier[kx,ky]) > 1e-06:
-          print('kx, ky = ', kx, ky, fx_Fourier[kx,ky])
+      # Shift mode
+      vx_Fourier[kx, ky] = vx_Fourier[kx, ky] * expKx[kx] * expKy[ky] 
+      vy_Fourier[kx, ky] = vy_Fourier[kx, ky] * expKy[ky] * expKx[kx]
 
-        # Sound mode
-        if kx == 1 and ky == 2 and False:
-          k = np.sqrt(kx**2 + ky**2) 
-          #vx_Fourier[kx, ky] = kx / k * fx_Fourier.size
-          #vy_Fourier[kx, ky] = ky / k * fx_Fourier.size
-          vx_Fourier[kx, ky] = -ky / k * fx_Fourier.size
-          vy_Fourier[kx, ky] =  kx / k * fx_Fourier.size
-        
   return vx_Fourier, vy_Fourier
 
   
-def solve_Stokes(fx_mesh, fy_mesh, r_mesh, eta, kT, L):
+def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M):
   '''
   Solve Stokes equation with PBC.  
   '''
   # Prepare variables
-  dx = L[0] / r_mesh.shape[0]
-  dy = L[1] / r_mesh.shape[1]
+  dx = L[0] / M[0]
+  dy = L[1] / M[1]
 
   # Prepare gradient arrays
-  gradKx = (2 / dx) * np.sin(np.pi * np.arange(r_mesh.shape[0]) / r_mesh.shape[0]) * 1.0j
-  gradKy = (2 / dy) * np.sin(np.pi * np.arange(r_mesh.shape[1]) / r_mesh.shape[1]) * 1.0j
-  
+  gradKx = (1 / dx) * np.sin(2 * np.pi * np.arange(M[0]) / M[0]) * 1.0j
+  gradKy = (1 / dy) * np.sin(2 * np.pi * np.arange(M[1]) / M[1]) * 1.0j  
+  expKx = np.cos(np.pi * np.arange(M[0]) / M[0]) + 1.0j * np.sin(np.pi * np.arange(M[0]) / M[0])
+  expKy = np.cos(np.pi * np.arange(M[1]) / M[1]) + 1.0j * np.sin(np.pi * np.arange(M[1]) / M[1])
+        
   # Transform fields to Fourier space
   fx_Fourier = np.fft.fft2(fx_mesh)
   fy_Fourier = np.fft.fft2(fy_mesh)
 
   # Solve in Fourier space
-  vx_Fourier, vy_Fourier = solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, eta)
+  vx_Fourier, vy_Fourier = solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, expKx, expKy, eta)
 
   # Transform velocities to real space
-  vx_mesh = np.fft.ifft2(vx_Fourier).T
-  vy_mesh = np.fft.ifft2(vy_Fourier).T
+  vx_mesh = np.fft.ifft2(vx_Fourier)
+  vy_mesh = np.fft.ifft2(vy_Fourier)
 
   print(' ')
   print('vx_mesh.imag = ', np.linalg.norm(vx_mesh.imag))
@@ -372,11 +352,6 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters):
   M = parameters.get('M_system')
   L = parameters.get('L_system')
 
-  # Set grid coordinates along axes
-  dx = L / M
-  grid_x = np.array([0 + dx[0] * (x+0.5) for x in range(M[0])])
-  grid_y = np.array([0 + dx[1] * (x+0.5) for x in range(M[1])])
-  
   # Compute force between particles
   force_torque = np.zeros((x.shape[0], 3))
   force_torque[0, 0] = 1
@@ -385,19 +360,19 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters):
   fx_mesh, fy_mesh = spread(x, force_torque, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
   print('Fx = ', np.sum(fx_mesh) * L[0] / M[0] * L[1] / M[1])
   print('Fy = ', np.sum(fy_mesh) * L[0] / M[0] * L[1] / M[1])
- 
+   
   # Solve Stokes equations
-  # vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, r_mesh, eta, 0, L)
+  vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, eta, 0, L, M)
   
   # Interpolate velocity
-  vx_mesh = np.zeros((M[0], M[1]))
-  vy_mesh = np.zeros((M[0], M[1]))
-  vx_mesh[:,:] = fx_mesh
-  vy_mesh[:,:] = fy_mesh
+  #vx_mesh = np.zeros((M[0], M[1]))
+  #vy_mesh = np.zeros((M[0], M[1]))
+  #vx_mesh[:,:] = fx_mesh
+  #vy_mesh[:,:] = fy_mesh
   velocity_particles, strain_rate = interpolate(x, vx_mesh, vy_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
   print('velocity_particles = \n', velocity_particles, '\n\n')
 
-  if parameters.get('plot_velocity_field'):
+  if parameters.get('plot_velocity_field') == 'True':
     plot_velocity_field(L, M, vx_mesh, vy_mesh, parameters.get('output_name')) 
   
   # Advance particle positions
