@@ -182,7 +182,7 @@ def interpolate(x, vx_mesh, vy_mesh, sigma_u, sigma_w, L, M):
   Ly = L[1]
   dx = L[0] / M[0]
   dy = L[1] / M[1]
-  N = 4 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
+  N = 3 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
   sigma_u2 = sigma_u**2
   factor_gaussian = 1.0 / (2 * np.pi * sigma_u2)
   x_disp = np.zeros(2)
@@ -225,7 +225,7 @@ def spread(x, force_torque, sigma_u, sigma_w, L, M):
   Ly = L[1]
   dx = L[0] / M[0]
   dy = L[1] / M[1]
-  N = 4 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
+  N = 3 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
   sigma_u2 = sigma_u**2
   factor_gaussian = 1.0 / (2 * np.pi * sigma_u2)
   x_disp = np.zeros(2)
@@ -258,7 +258,7 @@ def spread(x, force_torque, sigma_u, sigma_w, L, M):
 
 
 @njit(parallel=False, fastmath=True)
-def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, expKx, expKy, eta):
+def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta):
   '''
   The solution is v = (1 - G*D/L) * force / (eta * L)
 
@@ -273,24 +273,25 @@ def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, expKx, expKy, e
   for kx in range(gradKx.shape[0]):
     for ky in range(gradKy.shape[0]):
       # Compute Laplacian
-      L = -gradKx[kx].imag**2 - gradKy[ky].imag**2
-      if abs(L) < 1e-10:
+      L = -LKx[kx]**2 - LKy[ky]**2
+      DG = -gradKx[kx].imag**2 - gradKy[ky].imag**2
+      if abs(DG) < 1e-12:
         continue
 
       # Shift mode
       fx_Fourier[kx, ky] = fx_Fourier[kx, ky] * np.conjugate(expKx[kx]) * np.conjugate(expKy[ky]) 
-      fy_Fourier[kx, ky] = fy_Fourier[kx, ky] * np.conjugate(expKy[ky]) * np.conjugate(expKx[kx]) 
+      fy_Fourier[kx, ky] = fy_Fourier[kx, ky] * np.conjugate(expKx[kx]) * np.conjugate(expKy[ky]) 
                
       # Compute divergence of the force 
       div = gradKx[kx] * fx_Fourier[kx, ky] + gradKy[ky] * fy_Fourier[kx, ky]
         
       # Compute velocity 
-      vx_Fourier[kx, ky] = -(fx_Fourier[kx, ky] - gradKx[kx] * div / L) / (eta * L) 
-      vy_Fourier[kx, ky] = -(fy_Fourier[kx, ky] - gradKy[ky] * div / L) / (eta * L)
+      vx_Fourier[kx, ky] = -(fx_Fourier[kx, ky] - gradKx[kx] * div / DG) / (eta * L) 
+      vy_Fourier[kx, ky] = -(fy_Fourier[kx, ky] - gradKy[ky] * div / DG) / (eta * L)
 
       # Shift mode
       vx_Fourier[kx, ky] = vx_Fourier[kx, ky] * expKx[kx] * expKy[ky] 
-      vy_Fourier[kx, ky] = vy_Fourier[kx, ky] * expKy[ky] * expKx[kx]
+      vy_Fourier[kx, ky] = vy_Fourier[kx, ky] * expKx[kx] * expKy[ky]
 
   return vx_Fourier, vy_Fourier
 
@@ -305,7 +306,9 @@ def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M):
 
   # Prepare gradient arrays
   gradKx = (1 / dx) * np.sin(2 * np.pi * np.arange(M[0]) / M[0]) * 1.0j
-  gradKy = (1 / dy) * np.sin(2 * np.pi * np.arange(M[1]) / M[1]) * 1.0j  
+  gradKy = (1 / dy) * np.sin(2 * np.pi * np.arange(M[1]) / M[1]) * 1.0j
+  LKx =    (2 / dx) * np.sin(    np.pi * np.arange(M[0]) / M[0])
+  LKy =    (2 / dy) * np.sin(    np.pi * np.arange(M[1]) / M[1])   
   expKx = np.cos(np.pi * np.arange(M[0]) / M[0]) + 1.0j * np.sin(np.pi * np.arange(M[0]) / M[0])
   expKy = np.cos(np.pi * np.arange(M[1]) / M[1]) + 1.0j * np.sin(np.pi * np.arange(M[1]) / M[1])
         
@@ -314,7 +317,7 @@ def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M):
   fy_Fourier = np.fft.fft2(fy_mesh)
 
   # Solve in Fourier space
-  vx_Fourier, vy_Fourier = solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, expKx, expKy, eta)
+  vx_Fourier, vy_Fourier = solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta)
 
   # Transform velocities to real space
   vx_mesh = np.fft.ifft2(vx_Fourier)
