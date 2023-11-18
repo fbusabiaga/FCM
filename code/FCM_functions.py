@@ -178,8 +178,6 @@ def interpolate(x, vx_mesh, vy_mesh, sigma_u, sigma_w, L, M):
   # strain_rate_yy = np.zeros(r_mesh.size // 2)
 
   # Prepare some variables
-  Lx = L[0]
-  Ly = L[1]
   dx = L[0] / M[0]
   dy = L[1] / M[1]
   N = 3 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
@@ -194,8 +192,8 @@ def interpolate(x, vx_mesh, vy_mesh, sigma_u, sigma_w, L, M):
 
   # Loop over particles
   for n in prange(x.shape[0]):
-    kx = int(x_PBC[n,0]  / Lx * M[0])
-    ky = int(x_PBC[n,1]  / Ly * M[1])
+    kx = int(x_PBC[n,0]  / L[0] * M[0])
+    ky = int(x_PBC[n,1]  / L[1] * M[1])
 
     # Loop over neighboring cells
     for cellx in range(-N, N, 1):
@@ -221,8 +219,6 @@ def spread(x, force_torque, sigma_u, sigma_w, L, M):
   fy_mesh = np.zeros((M[0], M[1]))
 
   # Prepare some variables
-  Lx = L[0]
-  Ly = L[1]
   dx = L[0] / M[0]
   dy = L[1] / M[1]
   N = 3 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
@@ -237,8 +233,8 @@ def spread(x, force_torque, sigma_u, sigma_w, L, M):
 
   # Loop over particles
   for n in range(x.shape[0]):
-    kx = int(x_PBC[n,0] / Lx * M[0])
-    ky = int(x_PBC[n,1] / Ly * M[1])
+    kx = int(x_PBC[n,0] / L[0] * M[0])
+    ky = int(x_PBC[n,1] / L[1] * M[1])
 
     # Loop over neighboring cells
     for cellx in range(-N, N, 1):
@@ -256,6 +252,56 @@ def spread(x, force_torque, sigma_u, sigma_w, L, M):
     
   return fx_mesh, fy_mesh
 
+
+@njit(parallel=False, fastmath=True)
+def solve_Stokes_Fourier_spectral(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta, L, M):
+  '''
+  The solution is v = (1 - G*D/L) * force / (eta * L)
+
+  with
+  G = Gradient
+  D = Divergence = Gradient^T
+  L = Laplacian = D * G  
+  '''
+  vx_Fourier = np.zeros_like(fx_Fourier)
+  vy_Fourier = np.zeros_like(fy_Fourier)  
+  
+  for kx in range(gradKx.shape[0]):        
+    for ky in range(gradKy.shape[0]):
+      # Get physical wave number
+      wx_indx = -M[0]+kx if kx > M[0] // 2 else kx
+      wy_indx = -M[1]+ky if ky > M[1] // 2 else ky
+
+      xHalf = 1 if (M[0] % 2) == 0 and (wx_indx == M[0] // 2) else 0
+      yHalf = 1 if (M[1] % 2) == 0 and (wy_indx == M[1] // 2) else 0
+
+      wx = -2 * np.pi * wx_indx / L[0] if (xHalf and wy_indx < 0) else 2 * np.pi * wx_indx / L[0]
+      wy = -2 * np.pi * wy_indx / L[1] if (yHalf and wx_indx < 0) else 2 * np.pi * wy_indx / L[1]
+
+      wx = wx * 1.0j
+      wy = wy * 1.0j
+      
+      # Compute Laplacian
+      Lap = -wx.imag**2 - wy.imag**2
+      if abs(Lap) < 1e-12:
+        continue
+
+      # Shift mode
+      fx_Fourier[kx, ky] = fx_Fourier[kx, ky] * np.conjugate(expKx[kx]) * np.conjugate(expKy[ky]) 
+      fy_Fourier[kx, ky] = fy_Fourier[kx, ky] * np.conjugate(expKx[kx]) * np.conjugate(expKy[ky]) 
+               
+      # Compute divergence of the force 
+      div = wx * fx_Fourier[kx, ky] + wy * fy_Fourier[kx, ky]
+        
+      # Compute velocity 
+      vx_Fourier[kx, ky] = -(fx_Fourier[kx, ky] - wx * div / Lap) / (eta * Lap) 
+      vy_Fourier[kx, ky] = -(fy_Fourier[kx, ky] - wy * div / Lap) / (eta * Lap)
+
+      # Shift mode
+      vx_Fourier[kx, ky] = vx_Fourier[kx, ky] * expKx[kx] * expKy[ky] 
+      vy_Fourier[kx, ky] = vy_Fourier[kx, ky] * expKx[kx] * expKy[ky]
+
+  return vx_Fourier, vy_Fourier
 
 @njit(parallel=False, fastmath=True)
 def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta):
@@ -318,7 +364,9 @@ def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M):
 
   # Solve in Fourier space
   vx_Fourier, vy_Fourier = solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta)
+  # vx_Fourier, vy_Fourier = solve_Stokes_Fourier_spectral(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta, L, M)
 
+  
   # Transform velocities to real space
   vx_mesh = np.fft.ifft2(vx_Fourier)
   vy_mesh = np.fft.ifft2(vy_Fourier)
