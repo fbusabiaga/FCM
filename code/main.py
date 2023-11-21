@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import argparse
+from shutil import copyfile
 import time
 
 # Import local code
@@ -16,6 +17,9 @@ if __name__ == '__main__':
 
   # Read input file
   parameters = FCM.read_input(input_file)
+
+  # Copy input file to output
+  copyfile(input_file, parameters.get('output_name') + '.inputfile')
 
   # Some input variables should be converted to integers or set to default values if they do not exist
   parameters['n_steps'] = int(parameters['n_steps']) if 'n_steps' in parameters else 1
