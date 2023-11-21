@@ -302,6 +302,7 @@ def solve_Stokes_Fourier_spectral(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, L
 
   return vx_Fourier, vy_Fourier
 
+
 @njit(parallel=False, fastmath=True)
 def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta):
   '''
@@ -341,7 +342,7 @@ def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx
   return vx_Fourier, vy_Fourier
 
   
-def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M, discretization='spectral'):
+def solve_Stokes(fx_mesh, fy_mesh, eta, kT, dt, L, M, discretization='spectral'):
   '''
   Solve Stokes equation with PBC.  
   '''
@@ -366,7 +367,12 @@ def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M, discretization='spectral'):
     vx_Fourier, vy_Fourier = solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta)
   elif discretization == 'spectral':
     vx_Fourier, vy_Fourier = solve_Stokes_Fourier_spectral(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta, L, M)
-
+    if kT > 0:
+      # Generate random numbers
+      random_numbers = np.random.randn(gradKx[0].size * gradKx[0].size * 4)
+      vx_Stochastic, vy_Stochastic = stochastic_velocity_spectral(random_numbers, gradKx, gradKy, LKx, LKy, expKx, expKy, eta, kT, dt, L, M)
+      vx_Fourier += vx_Stochastic
+      vy_Fourier += vy_Stochastic      
   
   # Transform velocities to real space
   vx_mesh = np.fft.ifft2(vx_Fourier)
@@ -491,21 +497,19 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, vel, parameter
   Forward Euler scheme without including stresslet.
   '''
   # Get parameters
-  eta = parameters.get('eta')  
+  eta = parameters.get('eta')
   M = parameters.get('M_system')
   L = parameters.get('L_system')
   discretization = parameters.get('discretization')
 
   # Compute force between particles
   force_torque = force_torque_pair_wise(x, L, parameters)
-  # force_torque += force_torque_single(x, L, parameters)
-  force_torque += np.random.randn(x.shape[0], 3)
 
   # Spread force
   fx_mesh, fy_mesh = spread(x, force_torque, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
      
   # Solve Stokes equations
-  vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, eta, 0, L, M, discretization=discretization)
+  vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, eta, 0, dt, L, M, discretization=discretization)
 
   # Plot fluid velocity field
   if parameters.get('plot_velocity_field') == 'True':
