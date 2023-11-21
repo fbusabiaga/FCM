@@ -1,0 +1,35 @@
+# Inputs are in units of miligram, micrometer and second.
+# In these units the force is in units of piconewtons.
+
+# Select integrator
+scheme                                   deterministic_forward_Euler_no_stresslet
+
+# Select number of steps and time step size
+dt                                       1
+n_steps                                  1000
+n_save                                   1
+solver_tolerance                         1e-10
+
+# Set fluid viscosity (eta), temperature, gravity force and blob radius
+eta                                      1
+kT                                       0.00414
+gravity_force                            0
+particle_radius                          1
+
+# Set parameters for the blob-blob interation
+repulsion_strength                       1
+debye_length                             0.1
+
+# Sytem size
+L_system                                 10 10
+M_system                                 100 100
+
+# Plot velocity field
+plot_velocity_field                      True
+
+# Load rigid bodies configuration, provide
+structure                                Structures/shell_6.clones
+
+# Set output name
+output_name                              ../data/run1
+
