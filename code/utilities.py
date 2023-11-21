@@ -73,6 +73,24 @@ def read_config(name):
   return x
 
 
+def correlation(g,h):
+  '''
+  Compute the correlation between two 1D functions using fft.
+  
+  Corr(g,h) = sum(g(t+tau) * h(tau)) = IFFT( FFT(g) * (FFT(h))^*) / Normalization
+  
+  Note that we have to padd the input array with zeros   because it is not necessarily periodic. 
+  See Numerical Recipies in C.
+  '''
+
+  # Padd input array with zeros and compute FFT
+  g_fft = np.fft.fft(np.concatenate([g, np.zeros(g.size)]))
+  h_fft_conj = np.conj(np.fft.fft(np.concatenate([h, np.zeros(h.size)])))
+
+  # Compute product, IFFT and normalize
+  return np.fft.ifft(g_fft * h_fft_conj)[0:g.size] / np.arange(len(g), 0, -1) 
+
+
 @njit(parallel=False, fastmath=True)
 def gr_numba(r_vectors, L, list_of_neighbors, offsets, rcut, nbins, Nblobs_body):
   '''
@@ -168,3 +186,72 @@ def radial_distribution_function(x, num_frames, rcut=1.0, nbins=100, r_vectors=N
       np.savetxt(name, gr, header=header)
       
   return gr
+
+
+def msd(x, dt, MSD_steps=None, output_name=None, header=''):
+  '''
+  Compute the translational MSD from the trajectory using FFT.
+
+  For translational variables we use:
+  N * MSD(tau) = sum((x(t+tau)-x(t))*(y(t+tau)-y(t))) = sum(x(t+tau)*y(t+tau)) + sum(x(t)*y(t)) - sum(x(t+tau)*y(t) - sum(x(t)*y(t+tau))
+
+  and we can use FFT to compute the last two terms (cross-correlation).
+
+  This code does not compute the rotational MSD.
+  '''
+  # Init variables
+  num_bodies = x.shape[1]
+ 
+  # Allocate MSD memory
+  if MSD_steps is None:
+    MSD_steps = x.shape[0]
+  else:
+    MSD_steps = x.shape[0] if x.shape[0] < MSD_steps else MSD_steps
+  MSD = np.zeros((MSD_steps, 2, 2))
+  MSD_average = np.zeros((MSD_steps, 2, 2))
+  MSD_std = np.zeros((MSD_steps, 2, 2))
+
+  # Compute correlations
+  for body in range(num_bodies):
+    corr_xx = np.real(correlation(x[:,body,0],x[:,body,0]))
+    corr_xy = np.real(correlation(x[:,body,0],x[:,body,1]))
+    corr_yx = np.real(correlation(x[:,body,1],x[:,body,0]))
+    corr_yy = np.real(correlation(x[:,body,1],x[:,body,1]))
+       
+    # Sum from t=0 to t=t_final-tau
+    sum_xx = np.cumsum(x[:,body,0]*x[:,body,0])[::-1] / np.arange(len(corr_xx), 0, -1)
+    sum_xy = np.cumsum(x[:,body,0]*x[:,body,1])[::-1] / np.arange(len(corr_xx), 0, -1)
+    sum_yx = np.cumsum(x[:,body,1]*x[:,body,0])[::-1] / np.arange(len(corr_xx), 0, -1)
+    sum_yy = np.cumsum(x[:,body,1]*x[:,body,1])[::-1] / np.arange(len(corr_xx), 0, -1)
+
+    # Sum from t=tau to t=t_final
+    sum_xx_tau = np.cumsum(x[::-1,body,0]*x[::-1,body,0])[::-1] / np.arange(len(corr_xx), 0, -1)
+    sum_xy_tau = np.cumsum(x[::-1,body,0]*x[::-1,body,1])[::-1] / np.arange(len(corr_xx), 0, -1)
+    sum_yx_tau = np.cumsum(x[::-1,body,1]*x[::-1,body,0])[::-1] / np.arange(len(corr_xx), 0, -1)
+    sum_yy_tau = np.cumsum(x[::-1,body,1]*x[::-1,body,1])[::-1] / np.arange(len(corr_xx), 0, -1)
+
+    # Compute MSD
+    MSD[:,0,0] = sum_xx_tau[:MSD_steps] + sum_xx[:MSD_steps] - 2.0 * corr_xx[:MSD_steps]
+    MSD[:,0,1] = sum_xy_tau[:MSD_steps] + sum_xy[:MSD_steps] - corr_xy[:MSD_steps] - corr_yx[:MSD_steps]
+    MSD[:,1,0] = sum_yx_tau[:MSD_steps] + sum_yx[:MSD_steps] - corr_yx[:MSD_steps] - corr_xy[:MSD_steps]
+    MSD[:,1,1] = sum_yy_tau[:MSD_steps] + sum_yy[:MSD_steps] - 2.0 * corr_yy[:MSD_steps]
+  
+    # Compute MSD std
+    MSD_std += body * (MSD - MSD_average) * (MSD - MSD_average) / float(body + 1)
+
+    # Compute average MSD
+    MSD_average += (MSD - MSD_average) / float(body + 1)    
+
+  MSD_std = np.sqrt(MSD_std / np.maximum(1, num_bodies - 1))
+
+  if output_name is not None:
+    if len(header) == 0:
+      header = 'Columns: linear MSD (4 terms)'
+    MSD_average = MSD_average.reshape(MSD.size // 4, 4)
+    MSD_std = MSD_std.reshape(MSD.size // 4, 4)
+    result = np.zeros((MSD_steps, 5))
+    result[:,0] = np.arange(MSD_steps) * dt
+    result[:,1:5] = MSD_average[0:MSD_steps]
+    np.savetxt(output_name, result, header=header)
+
+  return MSD_average, MSD_std

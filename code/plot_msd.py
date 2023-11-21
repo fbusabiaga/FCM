@@ -41,34 +41,33 @@ if __name__ == '__main__':
   name_config = '../data/run1.config'
 
   # Set parameters
-  num_frames_skip = 0
-  num_frames = 1000
-  nbins = 100
-
+  MSD_steps = 100
+  
   # Read input file
   parameters = FCM.read_input(input_file)
   file_prefix = parameters.get('output_name')
-  rcut = min(parameters.get('L_system')) / 2.0
   
   # Read config
   x = utilities.read_config(name_config)
 
   # Set additional parameters
-  L = parameters.get('L_system')
+  dt = parameters.get('dt')
+  n_save = parameters.get('n_save')
+  dt_sample = dt * n_save
 
   # Call gr
-  name = file_prefix + '.gr.dat'
-  gr = utilities.radial_distribution_function(x[num_frames_skip:], num_frames, rcut=rcut, nbins=nbins, r_vectors=None, L=L, name=name)
+  name = file_prefix + '.msd.dat'
+  msd, msd_std = utilities.msd(x, dt_sample, MSD_steps=MSD_steps, output_name=name)
 
   # Create two panels
   fig, axes = plt.subplots(1, 1, figsize=(5,5))
-      
+  
   # Plot panel one
-  axes.plot(gr[:,0], gr[:,1], linewidth=2, color='r', label=r'$g(r)$')
+  axes.errorbar(np.arange(msd.shape[0]) * dt_sample, np.sqrt(msd[:,0]**2 + msd[:,3]**2), yerr=np.sqrt(msd_std[:,0]**2 + msd_std[:,3]**2), linewidth=2, color='r', label=r'$MSD(r)$')
 
   # Set axes
-  axes.set_xlabel(r'$r$', fontsize=fontsize)
-  axes.set_ylabel(r'$g(r)$', fontsize=fontsize)
+  axes.set_xlabel(r'$t$', fontsize=fontsize)
+  axes.set_ylabel(r'$MSD(t)$', fontsize=fontsize)
   axes.tick_params(axis='both', which='major', labelsize=fontsize)
   axes.yaxis.offsetText.set_fontsize(fontsize)
 
@@ -80,7 +79,7 @@ if __name__ == '__main__':
   # fig.subplots_adjust(left=0.13, top=0.95, right=0.9, bottom=0.17, wspace=0.0, hspace=0.0)
   
   # Save to pdf and png
-  name = file_prefix + '.gr.pdf'
+  name = file_prefix + '.msd.pdf'
   plt.savefig(name, format='pdf') 
   plt.show()
 
