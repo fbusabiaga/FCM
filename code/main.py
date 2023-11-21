@@ -35,7 +35,7 @@ if __name__ == '__main__':
   parameters['discretization'] = parameters['discretization'] if 'discretization' in parameters else 'spectral'
 
   # Create some additional variables
-  parameters['sigma_u'] = parameters.get('particle_radius') * 0.66556976637237890625 # This prefactor works in 2d
+  parameters['sigma_u'] = parameters.get('particle_radius') / np.sqrt(np.pi)
   parameters['sigma_w'] = parameters.get('particle_radius') / (6.0 * np.sqrt(np.pi))**(1.0 / 3.0)
       
   # Read particles configuration
