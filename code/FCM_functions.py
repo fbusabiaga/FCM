@@ -6,7 +6,8 @@ from numba import njit, prange
 
 
 # Try to import the visit_writer (boost implementation)
-sys.path.append('../../RigidMultiblobsWall/')
+# sys.path.append('../../RigidMultiblobsWall/')
+sys.path.append('../')
 try:
   # import visit.visit_writer as visit_writer
   from visit import visit_writer as visit_writer
@@ -183,7 +184,7 @@ def interpolate(x, vx_mesh, vy_mesh, sigma_u, sigma_w, L, M):
   sigma_w2 = sigma_w**2  
 
   # Get vectors in the minimal image representation of size L=(Lx, Ly) and with a corner at (0,0).
-  x_PBC = np.empty_like(x)
+  x_PBC = np.empty_like(x[:,0:2])
   for axis in range(2):
     x_PBC[:,axis] = x[:,axis] - (x[:,axis] // L[axis]) * L[axis]
 
@@ -205,7 +206,7 @@ def interpolate(x, vx_mesh, vy_mesh, sigma_u, sigma_w, L, M):
         velocity_particles[n,0] += vx_mesh[kx_PBC, ky_PBC] * factor
         velocity_particles[n,1] += vy_mesh[kx_PBC, ky_PBC] * factor
     
-  return velocity_particles, 2
+  return velocity_particles
 
 
 @njit(parallel=False, fastmath=True)
@@ -225,7 +226,7 @@ def spread(x, force_torque, sigma_u, sigma_w, L, M):
   x_disp = np.zeros(2)
 
   # Get vectors in the minimal image representation of size L=(Lx, Ly) and with a corner at (0,0).
-  x_PBC = np.empty_like(x)
+  x_PBC = np.empty_like(x[:,0:2])
   for axis in range(2):
     x_PBC[:,axis] = x[:,axis] - (x[:,axis] // L[axis]) * L[axis]  
 
@@ -438,7 +439,7 @@ def force_torque_pair_wise(x, L, parameters):
 
   # Project to PBC, this is necessary here to build the Kd-tree with scipy.
   # Copy is necessary because we don't want to modify the original vector here
-  r_vectors = project_to_periodic_image(np.copy(x), L)
+  r_vectors = project_to_periodic_image(np.copy(x[:,0:2]), L)
 
   # Set box dimensions for PBC
   if L[0] > 0 or L[1] > 0:
@@ -497,7 +498,7 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, vel, parameter
 
   # Compute force between particles
   force_torque = force_torque_pair_wise(x, L, parameters)
-  # force_torque += force_torque_single(x, L, parameters)  
+  # force_torque += force_torque_single(x, L, parameters)
   print('force_torque = \n', force_torque)
 
   # Spread force
@@ -513,11 +514,11 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, vel, parameter
     plot_velocity_field(L, M, vx_mesh, vy_mesh, parameters.get('output_name')) 
   
   # Interpolate velocity
-  velocity_particles, strain_rate = interpolate(x, vx_mesh, vy_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
+  velocity_particles = interpolate(x, vx_mesh, vy_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
   vel[:,:] = velocity_particles
  
   # Advance particle positions
   x += dt * velocity_particles
-
+  
   
 
