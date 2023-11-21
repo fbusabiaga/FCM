@@ -65,9 +65,6 @@ if __name__ == '__main__':
       # Save velocities
       vel_file.write(str(x.shape[0]) + '\n')
       np.savetxt(vel_file, vel)
-
-      print('velocity_particles = \n', vel, '\n\n')
-      print('x = \n', x)
       
     # Advance time step
     FCM.advance_time_step(parameters.get('dt'), parameters.get('scheme'), step, x, vel, parameters)
@@ -84,8 +81,4 @@ if __name__ == '__main__':
     vel_file.write(str(x.shape[0]) + '\n')
     np.savetxt(vel_file, vel)
 
-    print('velocity_particles = \n', vel, '\n\n')
-    print('x = \n', x)
-
   
-    

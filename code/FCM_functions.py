@@ -499,13 +499,11 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, vel, parameter
   # Compute force between particles
   force_torque = force_torque_pair_wise(x, L, parameters)
   # force_torque += force_torque_single(x, L, parameters)
-  print('force_torque = \n', force_torque)
+  force_torque += np.random.randn(x.shape[0], 3)
 
   # Spread force
   fx_mesh, fy_mesh = spread(x, force_torque, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
-  print('Fx = ', np.sum(fx_mesh) * L[0] / M[0] * L[1] / M[1])
-  print('Fy = ', np.sum(fy_mesh) * L[0] / M[0] * L[1] / M[1])
-   
+     
   # Solve Stokes equations
   vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, eta, 0, L, M, discretization=discretization)
 
