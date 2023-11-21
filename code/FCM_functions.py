@@ -1,7 +1,9 @@
 import numpy as np
 import sys
 import argparse
+import scipy.spatial as scsp
 from numba import njit, prange
+
 
 # Try to import the visit_writer (boost implementation)
 sys.path.append('../../RigidMultiblobsWall/')
@@ -373,14 +375,97 @@ def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M, discretization='spectral'):
   vx_mesh = np.fft.ifft2(vx_Fourier)
   vy_mesh = np.fft.ifft2(vy_Fourier)
 
-  print(' ')
-  print('vx_mesh.imag = ', np.linalg.norm(vx_mesh.imag))
-  print('vy_mesh.imag = ', np.linalg.norm(vy_mesh.imag))
-  print('vx_mesh.real = ', np.linalg.norm(vx_mesh.real))
-  print('vy_mesh.real = ', np.linalg.norm(vy_mesh.real))
-  print(' ')
-  
   return vx_mesh.real, vy_mesh.real
+
+
+@njit(parallel=True, fastmath=True)
+def force_torque_tree_numba(r_vectors, L, eps, b, a, list_of_neighbors, offsets):
+  '''
+  This function compute the force between two blobs
+  with vector between blob centers r.
+
+  In this example the torque=0 and the force is derived from the potential
+  
+  U(r) = U0 + U0 * (2*a-r)/b   if z<2*a
+  U(r) = U0 * exp(-(r-2*a)/b)  iz z>=2*a
+  
+  with
+  eps = potential strength
+  r_norm = distance between blobs
+  b = Debye length
+  a = blob_radius
+  '''
+  N = r_vectors.size // 2
+  r_vectors = r_vectors.reshape((N, 2))
+  force_torque = np.zeros((N, 3))
+  
+  # Copy arrays
+  rx_vec = np.copy(r_vectors[:,0])
+  ry_vec = np.copy(r_vectors[:,1])
+  Lx = L[0]
+  Ly = L[1]
+
+  for i in prange(N):
+    for k in range(offsets[i+1] - offsets[i]):
+      j = list_of_neighbors[offsets[i] + k]
+      if i == j:
+        continue
+      rx = rx_vec[j] - rx_vec[i]
+      ry = ry_vec[j] - ry_vec[i]
+
+      # Use distance with PBC
+      if Lx > 0:
+        rx = rx - int(rx / Lx + 0.5 * (int(rx>0) - int(rx<0))) * Lx
+      if Ly > 0:
+        ry = ry - int(ry / Ly + 0.5 * (int(ry>0) - int(ry<0))) * Ly
+
+      # Compute force
+      r_norm = np.sqrt(rx*rx + ry*ry)
+      if r_norm > 2*a:
+        f0 = -((eps / b) * np.exp(-(r_norm - 2.0*a) / b) / r_norm)
+      else:
+        f0 = -((eps / b) / np.maximum(r_norm, 1e-25))
+      force_torque[i, 0] += f0 * rx
+      force_torque[i, 1] += f0 * ry
+  return force_torque
+
+
+def force_torque_tree(x, L, parameters):
+  '''
+  This function computes the forces and torques between colloids.
+  '''     
+  # Get parameters from arguments
+  eps = parameters.get('repulsion_strength')
+  b = parameters.get('debye_length')
+  a = parameters.get('particle_radius')
+  d_max = 2 * a + 30 * b # Cutoff distance for interactions
+
+  # Project to PBC, this is necessary here to build the Kd-tree with scipy.
+  # Copy is necessary because we don't want to modify the original vector here
+  r_vectors = project_to_periodic_image(np.copy(x), L)
+
+  # Set box dimensions for PBC
+  if L[0] > 0 or L[1] > 0:
+    boxsize = np.zeros(2)
+    for i in range(2):
+      if L[i] > 0:
+        boxsize[i] = L[i]
+      else:
+        boxsize[i] = (np.max(r_vectors[:,i]) - np.min(r_vectors[:,i])) + d_max * 10
+  else:
+    boxsize = None   
+
+  # Build tree
+  tree = scsp.cKDTree(r_vectors, boxsize=boxsize)
+  pairs = tree.query_ball_tree(tree, d_max)
+  offsets = np.zeros(len(pairs)+1, dtype=int)
+  for i in range(len(pairs)):
+    offsets[i+1] = offsets[i] + len(pairs[i])
+  list_of_neighbors = np.concatenate(pairs).ravel()
+  
+  # Compute forces and torques
+  force_torque = force_torque_tree_numba(r_vectors, L, eps, b, a, list_of_neighbors, offsets)
+  return force_torque
 
 
 def advance_time_step(dt, scheme, step, x, parameters):
@@ -409,7 +494,8 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters):
   # Compute force between particles
   force_torque = np.zeros((x.shape[0], 3))
   force_torque[0, 0] = 1
-  
+  force_torque = force_torque_tree(x, L, parameters)
+
   # Spread force
   fx_mesh, fy_mesh = spread(x, force_torque, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
   print('Fx = ', np.sum(fx_mesh) * L[0] / M[0] * L[1] / M[1])

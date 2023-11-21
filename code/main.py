@@ -25,6 +25,8 @@ if __name__ == '__main__':
 
   # Some input variables should be set to default values if they do not exist
   parameters['kT'] = parameters['n_steps'] if 'kT' in parameters else 0
+  parameters['repulsion_strength'] = parameters['repulsion_strength'] if 'repulsion_strength' in parameters else 0.0
+  parameters['debye_length'] = parameters['debye_length'] if 'debye_length' in parameters else 1.0
   parameters['plot_velocity_field'] = parameters['plot_velocity_field'] if 'plot_velocity_field' in parameters else False
   parameters['discretization'] = parameters['discretization'] if 'discretization' in parameters else 'spectral'
 
