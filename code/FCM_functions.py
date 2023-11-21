@@ -342,7 +342,7 @@ def solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx
   return vx_Fourier, vy_Fourier
 
   
-def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M):
+def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M, discretization='spectral'):
   '''
   Solve Stokes equation with PBC.  
   '''
@@ -363,8 +363,10 @@ def solve_Stokes(fx_mesh, fy_mesh, eta, kT, L, M):
   fy_Fourier = np.fft.fft2(fy_mesh)
 
   # Solve in Fourier space
-  vx_Fourier, vy_Fourier = solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta)
-  # vx_Fourier, vy_Fourier = solve_Stokes_Fourier_spectral(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta, L, M)
+  if discretization == 'finite_volumes':
+    vx_Fourier, vy_Fourier = solve_Stokes_Fourier(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta)
+  elif discretization == 'spectral':
+    vx_Fourier, vy_Fourier = solve_Stokes_Fourier_spectral(fx_Fourier, fy_Fourier, gradKx, gradKy, LKx, LKy, expKx, expKy, eta, L, M)
 
   
   # Transform velocities to real space
@@ -402,6 +404,7 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters):
   eta = parameters.get('eta')  
   M = parameters.get('M_system')
   L = parameters.get('L_system')
+  discretization = parameters.get('discretization')
 
   # Compute force between particles
   force_torque = np.zeros((x.shape[0], 3))
@@ -413,13 +416,9 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters):
   print('Fy = ', np.sum(fy_mesh) * L[0] / M[0] * L[1] / M[1])
    
   # Solve Stokes equations
-  vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, eta, 0, L, M)
+  vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, eta, 0, L, M, discretization=discretization)
   
   # Interpolate velocity
-  #vx_mesh = np.zeros((M[0], M[1]))
-  #vy_mesh = np.zeros((M[0], M[1]))
-  #vx_mesh[:,:] = fx_mesh
-  #vy_mesh[:,:] = fy_mesh
   velocity_particles, strain_rate = interpolate(x, vx_mesh, vy_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
   print('velocity_particles = \n', velocity_particles, '\n\n')
 

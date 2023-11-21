@@ -26,9 +26,9 @@ if __name__ == '__main__':
   # Some input variables should be set to default values if they do not exist
   parameters['kT'] = parameters['n_steps'] if 'kT' in parameters else 0
   parameters['plot_velocity_field'] = parameters['plot_velocity_field'] if 'plot_velocity_field' in parameters else False
+  parameters['discretization'] = parameters['discretization'] if 'discretization' in parameters else 'spectral'
 
   # Create some additional variables
-  # parameters['sigma_u'] = parameters.get('particle_radius') / np.sqrt(np.pi)
   parameters['sigma_u'] = parameters.get('particle_radius') * 0.66556976637237890625 # This prefactor works in 2d
   parameters['sigma_w'] = parameters.get('particle_radius') / (6.0 * np.sqrt(np.pi))**(1.0 / 3.0)
       
