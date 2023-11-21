@@ -36,11 +36,15 @@ if __name__ == '__main__':
       
   # Read particles configuration
   x = FCM.read_config(parameters.get('structure'))
+  vel = np.zeros_like(x)
 
   # Open files
   if True:
     name = parameters.get('output_name') + '.config'
     config_file = open(name, 'w')
+    name = parameters.get('output_name') + '.vel'
+    vel_file = open(name, 'w')
+    
       
   # Time loop
   start_time = time.time()
@@ -53,16 +57,31 @@ if __name__ == '__main__':
       # Save configuration
       config_file.write(str(x.shape[0]) + '\n')
       np.savetxt(config_file, x)
+
+      # Save velocities
+      vel_file.write(str(x.shape[0]) + '\n')
+      np.savetxt(vel_file, vel)
+
+      print('velocity_particles = \n', vel, '\n\n')
+      print('x = \n', x)
       
-      # Advance time step
-      FCM.advance_time_step(parameters.get('dt'), parameters.get('scheme'), step, x, parameters)
+    # Advance time step
+    FCM.advance_time_step(parameters.get('dt'), parameters.get('scheme'), step, x, vel, parameters)
     
   # Save last configuration if necessary
   if ((step+1) % parameters.get('n_save')) == 0 and step+1 >= 0:    
     print('step = ', step+1, ', time = ', time.time() - start_time)
-
+    
     # Save configuration
     config_file.write(str(x.shape[0]) + '\n')
     np.savetxt(config_file, x)
+
+    # Save velocities
+    vel_file.write(str(x.shape[0]) + '\n')
+    np.savetxt(vel_file, vel)
+
+    print('velocity_particles = \n', vel, '\n\n')
+    print('x = \n', x)
+
   
-  
+    

@@ -174,18 +174,13 @@ def interpolate(x, vx_mesh, vy_mesh, sigma_u, sigma_w, L, M):
   Interpolate fluid velocity.
   '''
   velocity_particles = np.zeros_like(x)
-  # strain_rate_xx = np.zeros(r_mesh.size // 2)
-  # strain_rate_xy = np.zeros(r_mesh.size // 2)
-  # strain_rate_yx = np.zeros(r_mesh.size // 2)
-  # strain_rate_yy = np.zeros(r_mesh.size // 2)
 
   # Prepare some variables
   dx = L[0] / M[0]
   dy = L[1] / M[1]
   N = 3 * np.sqrt(np.pi) * sigma_u / min(dx, dy)
   sigma_u2 = sigma_u**2
-  factor_gaussian = 1.0 / (2 * np.pi * sigma_u2)
-  x_disp = np.zeros(2)
+  sigma_w2 = sigma_w**2  
 
   # Get vectors in the minimal image representation of size L=(Lx, Ly) and with a corner at (0,0).
   x_PBC = np.empty_like(x)
@@ -194,6 +189,7 @@ def interpolate(x, vx_mesh, vy_mesh, sigma_u, sigma_w, L, M):
 
   # Loop over particles
   for n in prange(x.shape[0]):
+    x_disp = np.zeros(2)
     kx = int(x_PBC[n,0]  / L[0] * M[0])
     ky = int(x_PBC[n,1]  / L[1] * M[1])
 
@@ -468,20 +464,20 @@ def force_torque_tree(x, L, parameters):
   return force_torque
 
 
-def advance_time_step(dt, scheme, step, x, parameters):
+def advance_time_step(dt, scheme, step, x, vel, parameters):
   '''
   Advance time step with integrator self.scheme
   '''
   if scheme == 'deterministic_forward_Euler_no_stresslet':
-    return deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters) 
+    return deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, vel, parameters) 
   elif scheme == 'deterministic_forward_Euler':
-    return deterministic_forward_Euler(dt, scheme, step, parameters)
+    return deterministic_forward_Euler(dt, scheme, step, x, vel, parameters)
   else:
     print('Scheme: ', scheme, ' is not implemented.')
   return
 
 
-def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters):
+def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, vel, parameters):
   '''
   Forward Euler scheme without including stresslet.
   '''
@@ -492,9 +488,8 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters):
   discretization = parameters.get('discretization')
 
   # Compute force between particles
-  force_torque = np.zeros((x.shape[0], 3))
-  force_torque[0, 0] = 1
   force_torque = force_torque_tree(x, L, parameters)
+  print('force_torque = \n', force_torque)
 
   # Spread force
   fx_mesh, fy_mesh = spread(x, force_torque, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
@@ -503,18 +498,17 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, parameters):
    
   # Solve Stokes equations
   vx_mesh, vy_mesh = solve_Stokes(fx_mesh, fy_mesh, eta, 0, L, M, discretization=discretization)
-  
-  # Interpolate velocity
-  velocity_particles, strain_rate = interpolate(x, vx_mesh, vy_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
-  print('velocity_particles = \n', velocity_particles, '\n\n')
 
+  # Plot fluid velocity field
   if parameters.get('plot_velocity_field') == 'True':
     plot_velocity_field(L, M, vx_mesh, vy_mesh, parameters.get('output_name')) 
   
+  # Interpolate velocity
+  velocity_particles, strain_rate = interpolate(x, vx_mesh, vy_mesh, parameters.get('sigma_u'), parameters.get('sigma_w'), L, M)
+  vel[:,:] = velocity_particles
+ 
   # Advance particle positions
   x += dt * velocity_particles
-  print('x = ', x)
 
   
-
 
