@@ -426,7 +426,7 @@ def force_torque_tree_numba(r_vectors, L, eps, b, a, list_of_neighbors, offsets)
   return force_torque
 
 
-def force_torque_tree(x, L, parameters):
+def force_torque_pair_wise(x, L, parameters):
   '''
   This function computes the forces and torques between colloids.
   '''     
@@ -464,6 +464,14 @@ def force_torque_tree(x, L, parameters):
   return force_torque
 
 
+def force_torque_single(x, L, parameters):
+  '''
+  Compute the external force torque on the particles.
+  '''
+
+  return
+  
+
 def advance_time_step(dt, scheme, step, x, vel, parameters):
   '''
   Advance time step with integrator self.scheme
@@ -488,7 +496,8 @@ def deterministic_forward_Euler_no_stresslet(dt, scheme, step, x, vel, parameter
   discretization = parameters.get('discretization')
 
   # Compute force between particles
-  force_torque = force_torque_tree(x, L, parameters)
+  force_torque = force_torque_pair_wise(x, L, parameters)
+  # force_torque += force_torque_single(x, L, parameters)  
   print('force_torque = \n', force_torque)
 
   # Spread force
